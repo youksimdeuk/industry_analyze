@@ -1,0 +1,41 @@
+name: 산업분석 자동 실행
+
+on:
+  schedule:
+    - cron: '0 16 * * *'   # 매일 KST 01:00 (UTC 16:00)
+  workflow_dispatch:         # 수동 실행 버튼
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      - name: Google 인증 파일 생성
+        run: |
+          echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
+          echo '${{ secrets.GOOGLE_TOKEN_JSON }}' > token.json
+
+      - name: 산업분석 실행
+        env:
+          OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_CREDENTIALS_PATH:   credentials.json
+          GOOGLE_TOKEN_PATH:         token.json
+          WP_URL:                    ${{ secrets.WP_URL }}
+          WP_USERNAME:               ${{ secrets.WP_USERNAME }}
+          WP_APP_PASSWORD:           ${{ secrets.WP_APP_PASSWORD }}
+          SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PUBLISH_WEBHOOK_URL:       ${{ secrets.PUBLISH_WEBHOOK_URL }}
+        run: python industry_main.py
