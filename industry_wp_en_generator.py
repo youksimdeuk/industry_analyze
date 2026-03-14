@@ -72,6 +72,8 @@ def generate_toc_en(industry_name, deep_research_text):
     prompt = f"""You are an SEO/AEO expert editor targeting global equity investors.
 Analyze the deep research content about '{industry_name}' and design an optimal blog article structure.
 
+IMPORTANT: All output must be in English only. Do not use Korean or any other language.
+
 Rules:
 1. Create 5–8 H2 sections tailored to this specific industry (no fixed templates)
 2. Add 1–3 H3 subsections under H2 where needed
@@ -79,6 +81,7 @@ Rules:
 4. SEO: arrange sections to match informational + commercial search intent
 5. AEO: include clear Q&A structure that AI engines can cite
 6. Each section: include an anchor id (lowercase hyphen)
+7. All section titles and subtitles must be in English
 
 Deep research content (first 3000 chars):
 {deep_research_text[:3000]}
@@ -104,6 +107,8 @@ def generate_seo_meta_en(industry_name, toc, deep_research_text):
     toc_summary = ' > '.join([s.get('h2', '') for s in toc])
     prompt = f"""Generate SEO metadata for an English-language blog article about the '{industry_name}' industry,
 targeting global equity investors.
+
+IMPORTANT: All output must be in English only. Do not use Korean.
 
 TOC structure: {toc_summary}
 
@@ -186,6 +191,8 @@ def generate_intro_en(industry_name, deep_research_text, focus_keyword):
     prompt = f"""Write a 3-sentence introduction for an English blog article about '{industry_name}' industry analysis,
 targeting global equity investors.
 
+IMPORTANT: Write in English only. Do not use Korean.
+
 Rules:
 - Include '{focus_keyword}' within the first 100 characters of sentence 1
 - Deliver a direct, factual answer about the industry's current state (AI snippet optimization)
@@ -225,6 +232,8 @@ def generate_section_content_en(industry_name, section, deep_research_text, focu
     prompt = f"""Write the [{h2}] section for an English '{industry_name}' industry analysis article
 targeting global equity investors.
 
+IMPORTANT: Write in English only. Do not use Korean anywhere — not in headings, paragraphs, or tables.
+
 Rules:
 - First paragraph (2–3 sentences): direct answer to what this section covers (AEO: AI citation ready)
 - Include specific numbers (market size, growth rates, market share) with years
@@ -251,6 +260,8 @@ def generate_faq_en(industry_name, faq_topics, deep_research_text):
     """Generate FAQ Q&A pairs (AEO optimized)"""
     topics_str = '\n'.join(f'- {t}' for t in faq_topics)
     prompt = f"""Generate FAQ entries for a '{industry_name}' industry analysis article targeting global investors.
+
+IMPORTANT: Write in English only. Do not use Korean.
 
 FAQ topics:
 {topics_str}
