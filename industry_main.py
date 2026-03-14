@@ -10,7 +10,6 @@ industry_main.py — 산업분석 자동화 메인
 
 import os
 import sys
-import json
 import time
 import requests
 from datetime import datetime
@@ -40,10 +39,6 @@ from pdf_extractor import extract_from_pdf
 SCOPES = [
     'https://www.googleapis.com/auth/drive.readonly',
 ]
-
-# 처리 완료 기록 파일
-PROCESSED_LOG = 'processed_docs.json'
-
 
 # =====================================================
 # Google 인증
@@ -122,28 +117,35 @@ def extract_industry_name(doc_name):
 
 
 # =====================================================
-# 처리 완료 기록 관리
+# Supabase 중복 체크 + 저장
 # =====================================================
 
-def load_processed():
-    """처리 완료된 doc_id 목록 로드"""
-    if os.path.exists(PROCESSED_LOG):
-        try:
-            with open(PROCESSED_LOG, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
+def _supabase_headers():
+    return {
+        'apikey':        SUPABASE_SERVICE_ROLE_KEY,
+        'Authorization': f'Bearer {SUPABASE_SERVICE_ROLE_KEY}',
+        'Content-Type':  'application/json',
+    }
 
 
-def save_processed(processed):
-    with open(PROCESSED_LOG, 'w', encoding='utf-8') as f:
-        json.dump(processed, f, ensure_ascii=False, indent=2)
+def is_already_processed(industry_name, period_key):
+    """Supabase에서 해당 industry_name + period_key 레코드가 있으면 True"""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        return False
+    try:
+        url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/industry_posts"
+        r = requests.get(
+            url,
+            params={'industry_name': f'eq.{industry_name}', 'period_key': f'eq.{period_key}', 'select': 'industry_name'},
+            headers=_supabase_headers(),
+            timeout=10,
+        )
+        if r.status_code == 200 and r.json():
+            return True
+    except Exception as e:
+        print(f"  [Supabase] 중복 체크 오류 (무시): {e}")
+    return False
 
-
-# =====================================================
-# Supabase 저장
-# =====================================================
 
 def save_to_supabase(industry_name, period_key, content_ko='', content_en='',
                      wp_ko_url=None, wp_en_url=None, slug=None, blog_summary_ko=''):
@@ -151,12 +153,7 @@ def save_to_supabase(industry_name, period_key, content_ko='', content_en='',
         print("  [Supabase] 환경변수 없음 — 저장 스킵")
         return
     url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/industry_posts"
-    headers = {
-        'apikey':        SUPABASE_SERVICE_ROLE_KEY,
-        'Authorization': f'Bearer {SUPABASE_SERVICE_ROLE_KEY}',
-        'Content-Type':  'application/json',
-        'Prefer':        'resolution=merge-duplicates',
-    }
+    headers = {**_supabase_headers(), 'Prefer': 'resolution=merge-duplicates'}
     payload = {
         'industry_name':    industry_name,
         'period_key':       period_key,
@@ -321,8 +318,7 @@ def run_all():
     creds = get_google_creds()
     drive_service = build('drive', 'v3', credentials=creds)  # 1회 생성 후 재사용
 
-    processed = load_processed()
-
+    period_key = datetime.now().strftime('%Y-%m')
     summary = {'found': 0, 'processed': 0, 'skipped': 0, 'failed': 0}
 
     # 특정 문서 직접 지정 모드
@@ -330,15 +326,14 @@ def run_all():
         print(f"\n[직접실행] TARGET_DOC_ID 지정됨: {target_id}")
         meta = drive_service.files().get(fileId=target_id, fields='id,name').execute()
         doc_name = meta.get('name', target_id)
+        industry_name = extract_industry_name(doc_name)
         summary['found'] = 1
-        if target_id in processed and not force:
-            print(f"  이미 처리됨. 건너뜀 (FORCE_REANALYZE 미지정)")
+        if not force and is_already_processed(industry_name, period_key):
+            print(f"  이미 처리됨 (Supabase). 건너뜀 (FORCE_REANALYZE 미지정)")
             summary['skipped'] += 1
             return summary
         ok = process_doc(drive_service, target_id, doc_name)
         if ok:
-            processed[target_id] = {'name': doc_name, 'ts': datetime.now().isoformat()}
-            save_processed(processed)
             summary['processed'] += 1
         else:
             summary['failed'] += 1
@@ -352,17 +347,16 @@ def run_all():
 
     summary['found'] = len(docs)
     for doc in docs:
-        doc_id   = doc['id']
-        doc_name = doc['name']
-        if doc_id in processed and not force:
-            print(f"  [{doc_name}] 이미 처리됨. 건너뜀.")
+        doc_id        = doc['id']
+        doc_name      = doc['name']
+        industry_name = extract_industry_name(doc_name)
+        if not force and is_already_processed(industry_name, period_key):
+            print(f"  [{doc_name}] 이미 처리됨 (Supabase). 건너뜀.")
             summary['skipped'] += 1
             continue
         try:
             ok = process_doc(drive_service, doc_id, doc_name)
             if ok:
-                processed[doc_id] = {'name': doc_name, 'ts': datetime.now().isoformat()}
-                save_processed(processed)
                 summary['processed'] += 1
             else:
                 summary['failed'] += 1
