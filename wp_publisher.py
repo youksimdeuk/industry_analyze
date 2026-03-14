@@ -180,6 +180,35 @@ def upload_media(image_data: bytes, filename: str, ext: str) -> str:
 
 
 # =====================================================
+# 인증 사전 체크
+# =====================================================
+
+def check_wp_auth() -> bool:
+    """WP 인증 확인. 성공 True, 실패 False (에러 메시지 출력)."""
+    if not _WP_BASE_URL or not _WP_USER or not WP_APP_PASSWORD:
+        print("  [WP] 자격증명 미설정 — 발행 스킵")
+        return False
+    try:
+        r = requests.get(
+            _api('users/me'),
+            auth=_auth(), timeout=10,
+        )
+        if r.ok:
+            name = r.json().get('name', '(unknown)')
+            print(f"  [WP] 인증 성공: {name}")
+            return True
+        try:
+            wp_error = r.json()
+            print(f"  [WP] 인증 실패 {r.status_code} — code: {wp_error.get('code')} / {wp_error.get('message')}")
+        except ValueError:
+            print(f"  [WP] 인증 실패 {r.status_code}")
+        return False
+    except Exception as e:
+        print(f"  [WP] 인증 체크 오류: {e}")
+        return False
+
+
+# =====================================================
 # 발행 (draft)
 # =====================================================
 
@@ -210,7 +239,15 @@ def publish_industry_draft(article, lang='ko'):
     }
 
     r = requests.post(_api('posts'), json=payload, auth=_auth(), timeout=30)
-    r.raise_for_status()
+    if not r.ok:
+        try:
+            wp_error = r.json()
+            raise requests.HTTPError(
+                f"{r.status_code} {r.reason} — WP code: {wp_error.get('code')} / {wp_error.get('message')}",
+                response=r,
+            )
+        except (ValueError, KeyError):
+            r.raise_for_status()
     post = r.json()
     post_id  = post['id']
     post_url = post.get('link', '')

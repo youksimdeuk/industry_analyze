@@ -33,8 +33,9 @@ from config import (
 from industry_wp_ko_generator import generate_ko_article, _slugify
 from industry_wp_en_generator import generate_en_article
 from industry_blog_generator import generate_blog_post
-from wp_publisher import publish_industry_draft, upload_media
+from wp_publisher import publish_industry_draft, upload_media, check_wp_auth
 from pdf_extractor import extract_from_pdf
+from db import get_post_id, log_publish
 
 SCOPES = [
     'https://www.googleapis.com/auth/drive.readonly',
@@ -175,6 +176,7 @@ def save_to_supabase(industry_name, period_key, content_ko='', content_en='',
             print(f"  ⚠️ Supabase 저장 실패: {r.status_code} {r.text[:200]}")
     except Exception as e:
         print(f"  ⚠️ Supabase 저장 오류: {e}")
+    return get_post_id(industry_name, period_key)
 
 
 # =====================================================
@@ -209,6 +211,9 @@ def process_doc(drive_service, doc_id, doc_name):
     print(f"산업분석 시작: {industry_name}")
     print(f"{'='*50}")
 
+    # ── WP 인증 사전 확인 ──
+    wp_ready = check_wp_auth() if (WP_URL and WP_USERNAME and WP_APP_PASSWORD) else False
+
     # ── PDF 텍스트 + 이미지 추출 ──
     print("\n[1/5] PDF 원문 추출 중...")
     try:
@@ -222,7 +227,7 @@ def process_doc(drive_service, doc_id, doc_name):
     print(f"  ✅ {len(raw_text):,}자 추출 완료 (이미지 {len(images)}개)")
 
     # ── WP 이미지 업로드 ──
-    if images and WP_URL and WP_USERNAME and WP_APP_PASSWORD:
+    if images and wp_ready:
         print(f"\n  [WP Media] 이미지 {len(images)}개 업로드 중...")
         for i, img in enumerate(images):
             filename = f"{_slugify(industry_name)}-img{i + 1}.{img['ext']}"
@@ -237,35 +242,39 @@ def process_doc(drive_service, doc_id, doc_name):
 
     # ── 한국어 아티클 ──
     print("\n[2/5] 한국어 아티클 생성 중...")
+    ko_publish_error = None
     try:
         ko_article = generate_ko_article(industry_name, raw_text, images=wp_images)
         if ko_article:
             ko_content = ko_article.get('content', '')
-            if WP_URL and WP_USERNAME and WP_APP_PASSWORD:
+            if wp_ready:
                 ko_url  = publish_industry_draft(ko_article, lang='ko')
                 ko_slug = ko_article.get('slug')
                 print(f"  ✅ KO 임시저장: {ko_url}")
                 print(f"  포커스 키워드: {ko_article.get('focus_keyword', '-')}")
             else:
-                print("  [KO] WP 설정 없음 — 발행 스킵")
+                print("  [KO] WP 인증 없음 — 발행 스킵")
     except Exception as e:
+        ko_publish_error = str(e)
         print(f"  ⚠️ KO 아티클 생성/발행 실패: {e}")
 
     time.sleep(1)
 
     # ── 영어 아티클 ──
     print("\n[3/5] 영어 아티클 생성 중...")
+    en_publish_error = None
     try:
         en_article = generate_en_article(industry_name, raw_text, images=wp_images)
         if en_article:
             en_content = en_article.get('content', '')
-            if WP_URL and WP_USERNAME and WP_APP_PASSWORD:
+            if wp_ready:
                 en_url = publish_industry_draft(en_article, lang='en')
                 print(f"  ✅ EN 임시저장: {en_url}")
                 print(f"  Focus keyword: {en_article.get('focus_keyword', '-')}")
             else:
-                print("  [EN] WP 설정 없음 — 발행 스킵")
+                print("  [EN] WP 인증 없음 — 발행 스킵")
     except Exception as e:
+        en_publish_error = str(e)
         print(f"  ⚠️ EN 아티클 생성/발행 실패: {e}")
 
     # ── 블로그 요약 생성 ──
@@ -289,7 +298,7 @@ def process_doc(drive_service, doc_id, doc_name):
 
     # ── Supabase 저장 ──
     print("\n[5/5] Supabase 저장 중...")
-    save_to_supabase(
+    post_id = save_to_supabase(
         industry_name, period_key,
         content_ko=ko_content,
         content_en=en_content,
@@ -298,6 +307,16 @@ def process_doc(drive_service, doc_id, doc_name):
         slug=ko_slug,
         blog_summary_ko=blog_summary_ko,
     )
+
+    # ── 발행 이력 기록 ──
+    if post_id:
+        if wp_ready:
+            log_publish(post_id, 'wp_ko',
+                        status='success' if ko_url else 'failed',
+                        url=ko_url, error=ko_publish_error)
+            log_publish(post_id, 'wp_en',
+                        status='success' if en_url else 'failed',
+                        url=en_url, error=en_publish_error)
 
     # ── 알림 ──
     _send_notification(industry_name, ko_url, en_url)
