@@ -31,18 +31,32 @@ def _api(path):
 # 카테고리 / 태그
 # =====================================================
 
+def _raise_wp_error(r):
+    """WP 에러 상세 메시지 포함해서 raise"""
+    try:
+        wp = r.json()
+        raise requests.HTTPError(
+            f"{r.status_code} {r.reason} — WP code: {wp.get('code')} / {wp.get('message')}",
+            response=r,
+        )
+    except (ValueError, KeyError):
+        r.raise_for_status()
+
+
 def get_or_create_category(name):
     r = requests.get(
         _api('categories'),
         params={'search': name, 'per_page': 10},
         auth=_auth(), timeout=15,
     )
-    r.raise_for_status()
+    if not r.ok:
+        _raise_wp_error(r)
     for item in r.json():
         if item.get('name') == name:
             return item['id']
     r = requests.post(_api('categories'), json={'name': name}, auth=_auth(), timeout=15)
-    r.raise_for_status()
+    if not r.ok:
+        _raise_wp_error(r)
     return r.json()['id']
 
 
@@ -224,9 +238,7 @@ def publish_industry_draft(article, lang='ko'):
     cat_id  = get_or_create_category(category_name)
     tag_ids = get_or_create_tags(article.get('tags', []))
 
-    # Schema JSON-LD를 본문 앞에 삽입
-    schema_html = _build_schema_jsonld(article, lang=lang)
-    content = (schema_html + '\n' if schema_html else '') + article.get('content', '')
+    content = article.get('content', '')
 
     payload = {
         'title':      article.get('title', ''),
@@ -246,8 +258,11 @@ def publish_industry_draft(article, lang='ko'):
                 f"{r.status_code} {r.reason} — WP code: {wp_error.get('code')} / {wp_error.get('message')}",
                 response=r,
             )
-        except (ValueError, KeyError):
-            r.raise_for_status()
+        except ValueError:
+            raise requests.HTTPError(
+                f"{r.status_code} {r.reason} — 응답 본문: {r.text[:300]}",
+                response=r,
+            )
     post = r.json()
     post_id  = post['id']
     post_url = post.get('link', '')
