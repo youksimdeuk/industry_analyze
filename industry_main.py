@@ -1,11 +1,11 @@
 """
 industry_main.py — 산업분석 자동화 메인
 워크플로우:
-  1. 구글 드라이브에서 '*-산업분석' 구글 독스 탐색
-  2. 딥리서치 원문 텍스트 추출
+  1. 구글 드라이브 '산업분석' 폴더에서 '*-산업분석.pdf' 탐색
+  2. PDF 텍스트 추출 + 이미지 gpt-4o 분석
   3. 한국어 아티클 생성 → WordPress draft 발행
   4. 영어 아티클 생성 → WordPress draft 발행
-  5. Supabase 저장 (선택)
+  5. 블로그 요약 생성 → Supabase 저장
 """
 
 import os
@@ -18,7 +18,6 @@ from datetime import datetime
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
-import gspread
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -39,9 +38,7 @@ from wp_publisher import publish_industry_draft, upload_media
 from pdf_extractor import extract_from_pdf
 
 SCOPES = [
-    'https://www.googleapis.com/auth/spreadsheets.readonly',
     'https://www.googleapis.com/auth/drive.readonly',
-    'https://www.googleapis.com/auth/documents.readonly',
 ]
 
 # 처리 완료 기록 파일
@@ -350,7 +347,7 @@ def run_all():
     # 자동 탐색 모드
     docs = find_industry_docs(drive_service)
     if not docs:
-        print("  '-산업분석' 구글 독스가 없습니다.")
+        print("  '산업분석' 폴더에 *-산업분석.pdf 파일이 없습니다.")
         return summary
 
     summary['found'] = len(docs)

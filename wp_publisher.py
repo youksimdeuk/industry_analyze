@@ -73,13 +73,6 @@ def get_or_create_tags(tag_names):
 
 def _set_yoast_meta(post_id, seo_data):
     """Yoast SEO 플러그인 메타 업데이트 (REST API)"""
-    payload = {}
-    if seo_data.get('seo_title'):
-        payload['yoast_title'] = seo_data['seo_title']
-    if seo_data.get('meta_description'):
-        payload['yoast_meta'] = seo_data['meta_description']
-
-    # Yoast REST 필드: _yoast_wpseo_title, _yoast_wpseo_metadesc, _yoast_wpseo_focuskw
     meta_payload = {
         'meta': {
             '_yoast_wpseo_title':    seo_data.get('seo_title', ''),
