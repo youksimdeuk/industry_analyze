@@ -152,6 +152,41 @@ def _build_schema_jsonld(article_data, lang='ko'):
 
 
 # =====================================================
+# 이미지 미디어 업로드
+# =====================================================
+
+def upload_media(image_data: bytes, filename: str, ext: str) -> str:
+    """이미지를 WordPress 미디어 라이브러리에 업로드. source_url 반환 (실패 시 '')"""
+    if not _WP_BASE_URL or not _WP_USER or not WP_APP_PASSWORD:
+        return ''
+    mime_map = {
+        'png': 'image/png', 'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg', 'gif': 'image/gif', 'webp': 'image/webp',
+    }
+    mime = mime_map.get(ext.lower(), 'image/png')
+    try:
+        r = requests.post(
+            _api('media'),
+            data=image_data,
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"',
+                'Content-Type': mime,
+            },
+            auth=_auth(),
+            timeout=30,
+        )
+        if r.status_code in (200, 201):
+            url = r.json().get('source_url', '')
+            print(f"  [WP Media] 업로드 완료: {filename}")
+            return url
+        else:
+            print(f"  [WP Media] 업로드 실패: {r.status_code}")
+    except Exception as e:
+        print(f"  [WP Media] 업로드 오류: {e}")
+    return ''
+
+
+# =====================================================
 # 발행 (draft)
 # =====================================================
 

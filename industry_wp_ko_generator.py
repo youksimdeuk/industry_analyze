@@ -196,7 +196,7 @@ def generate_intro(industry_name, deep_research_text, focus_keyword):
     return _call_openai(prompt, max_tokens=600)
 
 
-def generate_section_content(industry_name, section, deep_research_text, focus_keyword):
+def generate_section_content(industry_name, section, deep_research_text, focus_keyword, images=None):
     """H2 섹션 1개의 본문 생성 (H3 포함)"""
     h2 = section.get('h2', '')
     h3_list = section.get('h3', [])
@@ -206,6 +206,21 @@ def generate_section_content(industry_name, section, deep_research_text, focus_k
     if h3_list:
         h3_instruction = f"\n- 다음 소섹션(H3)을 반드시 포함: {', '.join(h3_list)}"
 
+    image_instruction = ''
+    if images:
+        img_lines = '\n'.join(
+            f'  • 이미지{i + 1} (URL: {img["wp_url"]}): {img["description"]}'
+            for i, img in enumerate(images)
+            if img.get('wp_url') and img.get('description')
+        )
+        if img_lines:
+            image_instruction = (
+                f"\n- 아래 이미지 중 이 섹션과 관련 있는 것이 있으면 본문에 삽입하세요:\n{img_lines}"
+                "\n- 삽입 형식: <figure style=\"margin:16px 0;\"><img src=\"URL\" alt=\"설명\" "
+                "style=\"max-width:100%;height:auto;\"><figcaption style=\"font-size:12px;"
+                "color:#6b7280;text-align:center;\">설명</figcaption></figure>"
+            )
+
     prompt = f"""'{industry_name}' 산업분석 글의 [{h2}] 섹션 본문을 작성하세요.
 
 규칙:
@@ -214,7 +229,7 @@ def generate_section_content(industry_name, section, deep_research_text, focus_k
 - 데이터 비교는 HTML 테이블로 구조화
 - 모호한 일반론 금지 ("다양한", "지속적인" 등)
 - 한국 투자자 관점의 인사이트 포함
-- '{focus_keyword}' 키워드 자연스럽게 1~2회 포함{h3_instruction}
+- '{focus_keyword}' 키워드 자연스럽게 1~2회 포함{h3_instruction}{image_instruction}
 - HTML 형식으로 출력 (H3는 <h3> 태그 사용, 단락은 <p>, 테이블은 <table>)
 
 딥리서치 원문 참고:
@@ -255,10 +270,11 @@ JSON으로만 반환:
 # 메인: 한국어 아티클 조립
 # =====================================================
 
-def generate_ko_article(industry_name, deep_research_text, related_posts=None):
+def generate_ko_article(industry_name, deep_research_text, related_posts=None, images=None):
     """한국어 산업분석 아티클 전체 생성
     반환: dict (title, content, seo_title, meta_description, focus_keyword,
                  slug, tags, faq_list)
+    images: list of {'wp_url': str, 'description': str} — WP 업로드된 이미지
     """
     print(f"  [KO] 목차 설계 중...")
     toc, faq_topics = generate_toc(industry_name, deep_research_text)
@@ -283,7 +299,7 @@ def generate_ko_article(industry_name, deep_research_text, related_posts=None):
     for i, sec in enumerate(toc, 1):
         print(f"    섹션 {i}/{len(toc)}: {sec.get('h2', '')}")
         section_htmls.append(
-            generate_section_content(industry_name, sec, deep_research_text, focus_keyword)
+            generate_section_content(industry_name, sec, deep_research_text, focus_keyword, images=images)
         )
 
     print(f"  [KO] FAQ 생성 중...")

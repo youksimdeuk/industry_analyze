@@ -32,10 +32,11 @@ from config import (
     PUBLISH_WEBHOOK_URL,
     SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
 )
-from industry_wp_ko_generator import generate_ko_article
+from industry_wp_ko_generator import generate_ko_article, _slugify
 from industry_wp_en_generator import generate_en_article
 from industry_blog_generator import generate_blog_post
-from wp_publisher import publish_industry_draft
+from wp_publisher import publish_industry_draft, upload_media
+from pdf_extractor import extract_from_pdf
 
 SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets.readonly',
@@ -85,34 +86,42 @@ def get_google_creds():
 # =====================================================
 
 def find_industry_docs(drive_service):
-    """구글 드라이브에서 이름이 '*-산업분석'으로 끝나는 구글 독스 탐색"""
-    query = "name contains '-산업분석' and mimeType='application/vnd.google-apps.document' and trashed=false"
+    """구글 드라이브 '산업분석' 폴더에서 *-산업분석.pdf 탐색"""
+    # 1) '산업분석' 폴더 ID 조회
+    folder_res = drive_service.files().list(
+        q="name='산업분석' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+        fields="files(id, name)",
+    ).execute()
+    folders = folder_res.get('files', [])
+
+    if folders:
+        folder_id = folders[0]['id']
+        query = (
+            f"'{folder_id}' in parents and "
+            "name contains '-산업분석' and mimeType='application/pdf' and trashed=false"
+        )
+    else:
+        # 폴더 없으면 전체 드라이브에서 탐색
+        query = "name contains '-산업분석' and mimeType='application/pdf' and trashed=false"
+
     results = drive_service.files().list(
         q=query,
         fields="files(id, name, modifiedTime)",
         orderBy="modifiedTime desc",
     ).execute()
     files = results.get('files', [])
-    print(f"  [Drive] '{'-산업분석'}' 구글 독스 {len(files)}개 발견")
+    print(f"  [Drive] '*-산업분석.pdf' {len(files)}개 발견")
     return files
 
 
-def read_doc_text(drive_service, doc_id):
-    """구글 독스 내용을 plain text로 추출"""
-    resp = drive_service.files().export(
-        fileId=doc_id,
-        mimeType='text/plain'
-    ).execute()
-    if isinstance(resp, bytes):
-        return resp.decode('utf-8', errors='ignore')
-    return str(resp)
-
-
 def extract_industry_name(doc_name):
-    """'산업명-산업분석' → '산업명' 추출"""
-    if doc_name.endswith('-산업분석'):
-        return doc_name[:-len('-산업분석')].strip()
-    return doc_name.strip()
+    """'산업명-산업분석.pdf' → '산업명' 추출"""
+    name = doc_name
+    if name.lower().endswith('.pdf'):
+        name = name[:-4]
+    if name.endswith('-산업분석'):
+        return name[:-len('-산업분석')].strip()
+    return name.strip()
 
 
 # =====================================================
@@ -206,13 +215,26 @@ def process_doc(drive_service, doc_id, doc_name):
     print(f"산업분석 시작: {industry_name}")
     print(f"{'='*50}")
 
-    # 딥리서치 원문 추출
-    print("\n[1/5] 구글 독스 원문 추출 중...")
-    raw_text = read_doc_text(drive_service, doc_id)
+    # ── PDF 텍스트 + 이미지 추출 ──
+    print("\n[1/5] PDF 원문 추출 중...")
+    try:
+        raw_text, images = extract_from_pdf(drive_service, doc_id)
+    except Exception as e:
+        print(f"  ❌ PDF 추출 실패: {e}")
+        return False
     if not raw_text or len(raw_text.strip()) < 200:
         print("  ❌ 문서 내용이 너무 짧거나 비어 있습니다. 건너뜀.")
         return False
-    print(f"  ✅ {len(raw_text)}자 추출 완료")
+    print(f"  ✅ {len(raw_text):,}자 추출 완료 (이미지 {len(images)}개)")
+
+    # ── WP 이미지 업로드 ──
+    if images and WP_URL and WP_USERNAME and WP_APP_PASSWORD:
+        print(f"\n  [WP Media] 이미지 {len(images)}개 업로드 중...")
+        for i, img in enumerate(images):
+            filename = f"{_slugify(industry_name)}-img{i + 1}.{img['ext']}"
+            url = upload_media(img['data'], filename, img['ext'])
+            img['wp_url'] = url or None
+    wp_images = [img for img in images if img.get('wp_url')]
 
     ko_url = en_url = ko_slug = None
     ko_content = en_content = ''
@@ -222,7 +244,7 @@ def process_doc(drive_service, doc_id, doc_name):
     # ── 한국어 아티클 ──
     print("\n[2/5] 한국어 아티클 생성 중...")
     try:
-        ko_article = generate_ko_article(industry_name, raw_text)
+        ko_article = generate_ko_article(industry_name, raw_text, images=wp_images)
         if ko_article:
             ko_content = ko_article.get('content', '')
             if WP_URL and WP_USERNAME and WP_APP_PASSWORD:
@@ -240,7 +262,7 @@ def process_doc(drive_service, doc_id, doc_name):
     # ── 영어 아티클 ──
     print("\n[3/5] 영어 아티클 생성 중...")
     try:
-        en_article = generate_en_article(industry_name, raw_text)
+        en_article = generate_en_article(industry_name, raw_text, images=wp_images)
         if en_article:
             en_content = en_article.get('content', '')
             if WP_URL and WP_USERNAME and WP_APP_PASSWORD:

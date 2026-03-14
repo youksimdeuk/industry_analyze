@@ -197,7 +197,7 @@ Deep research content:
     return _call_openai(prompt, max_tokens=600)
 
 
-def generate_section_content_en(industry_name, section, deep_research_text, focus_keyword):
+def generate_section_content_en(industry_name, section, deep_research_text, focus_keyword, images=None):
     """Generate one H2 section body (with H3 subsections)"""
     h2 = section.get('h2', '')
     h3_list = section.get('h3', [])
@@ -206,6 +206,21 @@ def generate_section_content_en(industry_name, section, deep_research_text, focu
     h3_instruction = ''
     if h3_list:
         h3_instruction = f"\n- Must include these H3 subsections: {', '.join(h3_list)}"
+
+    image_instruction = ''
+    if images:
+        img_lines = '\n'.join(
+            f'  • Image{i + 1} (URL: {img["wp_url"]}): {img["description"]}'
+            for i, img in enumerate(images)
+            if img.get('wp_url') and img.get('description')
+        )
+        if img_lines:
+            image_instruction = (
+                f"\n- If any image below is relevant to this section, embed it:\n{img_lines}"
+                "\n- Embed format: <figure style=\"margin:16px 0;\"><img src=\"URL\" alt=\"description\" "
+                "style=\"max-width:100%;height:auto;\"><figcaption style=\"font-size:12px;"
+                "color:#6b7280;text-align:center;\">description</figcaption></figure>"
+            )
 
     prompt = f"""Write the [{h2}] section for an English '{industry_name}' industry analysis article
 targeting global equity investors.
@@ -216,7 +231,7 @@ Rules:
 - Use HTML tables for data comparisons
 - No vague generalities ("various", "continuous", etc.)
 - Include insights relevant to equity investors
-- Naturally include '{focus_keyword}' 1–2 times{h3_instruction}
+- Naturally include '{focus_keyword}' 1–2 times{h3_instruction}{image_instruction}
 - Output in HTML (H3 as <h3>, paragraphs as <p>, tables as <table>)
 - Do NOT include the H2 title tag — body only
 
@@ -258,10 +273,11 @@ Return JSON only:
 # 메인: 영어 아티클 조립
 # =====================================================
 
-def generate_en_article(industry_name, deep_research_text, related_posts=None):
+def generate_en_article(industry_name, deep_research_text, related_posts=None, images=None):
     """Generate full English industry analysis article.
     Returns: dict (title, content, seo_title, meta_description, focus_keyword,
                     slug, tags, faq_list)
+    images: list of {'wp_url': str, 'description': str} — WP uploaded images
     """
     print(f"  [EN] Designing TOC...")
     toc, faq_topics = generate_toc_en(industry_name, deep_research_text)
@@ -286,7 +302,7 @@ def generate_en_article(industry_name, deep_research_text, related_posts=None):
     for i, sec in enumerate(toc, 1):
         print(f"    Section {i}/{len(toc)}: {sec.get('h2', '')}")
         section_htmls.append(
-            generate_section_content_en(industry_name, sec, deep_research_text, focus_keyword)
+            generate_section_content_en(industry_name, sec, deep_research_text, focus_keyword, images=images)
         )
 
     print(f"  [EN] Generating FAQ...")
