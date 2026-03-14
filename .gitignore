@@ -1,0 +1,22 @@
+# 환경변수
+.env
+*.env
+
+# Google 인증 파일
+credentials.json
+token.json
+
+# 처리 로그
+processed_docs.json
+wp_publish_log.jsonl
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
