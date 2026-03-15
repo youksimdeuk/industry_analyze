@@ -73,6 +73,7 @@ def generate_toc_en(industry_name, deep_research_text):
 Analyze the deep research content about '{industry_name}' and design an optimal blog article structure.
 
 IMPORTANT: All output must be in English only. Do not use Korean or any other language.
+The industry name may be in Korean — translate it conceptually and use English equivalents in all titles.
 
 Rules:
 1. Create 5–8 H2 sections tailored to this specific industry (no fixed templates)
@@ -81,7 +82,7 @@ Rules:
 4. SEO: arrange sections to match informational + commercial search intent
 5. AEO: include clear Q&A structure that AI engines can cite
 6. Each section: include an anchor id (lowercase hyphen)
-7. All section titles and subtitles must be in English
+7. All section titles, subtitles, and FAQ topics must be in English — no Korean characters allowed
 
 Deep research content (first 3000 chars):
 {deep_research_text[:3000]}
@@ -108,7 +109,8 @@ def generate_seo_meta_en(industry_name, toc, deep_research_text):
     prompt = f"""Generate SEO metadata for an English-language blog article about the '{industry_name}' industry,
 targeting global equity investors.
 
-IMPORTANT: All output must be in English only. Do not use Korean.
+IMPORTANT: All output must be in English only. Do not use Korean anywhere.
+The industry name may be in Korean — translate it to English for the title, keyword, and slug.
 
 TOC structure: {toc_summary}
 
@@ -116,8 +118,8 @@ Deep research excerpt (first 1000 chars):
 {deep_research_text[:1000]}
 
 Rules:
-- focus_keyword: high-search-volume English keyword (e.g. "HBM memory market outlook 2025")
-- seo_title: under 60 chars, focus_keyword near the front, include year
+- focus_keyword: high-search-volume English keyword (e.g. "HBM memory market outlook 2025") — English only
+- seo_title: under 60 chars, English only, focus_keyword near the front, include year
 - meta_description: under 155 chars, include focus_keyword, include a compelling CTA
 - slug: lowercase English with hyphens, max 50 chars
 - tags: 10–15 tags covering industry, technology, countries, companies, themes
