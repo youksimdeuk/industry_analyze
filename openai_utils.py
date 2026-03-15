@@ -30,7 +30,8 @@ def _call_openai(prompt, max_tokens=16000, model=None):
 
 
 def _call_openai_json(prompt, max_tokens=6000):
-    for model in [OPENAI_MODEL, FALLBACK_MODEL]:
+    models = list(dict.fromkeys([OPENAI_MODEL, FALLBACK_MODEL]))
+    for model in models:
         for use_json in (True, False):
             for attempt in range(1, 4):
                 try:

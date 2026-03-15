@@ -35,12 +35,13 @@ def _raise_wp_error(r):
     """WP 에러 상세 메시지 포함해서 raise"""
     try:
         wp = r.json()
-        raise requests.HTTPError(
-            f"{r.status_code} {r.reason} — WP code: {wp.get('code')} / {wp.get('message')}",
-            response=r,
-        )
     except Exception:
         r.raise_for_status()
+        return
+    raise requests.HTTPError(
+        f"{r.status_code} {r.reason} — WP code: {wp.get('code')} / {wp.get('message')}",
+        response=r,
+    )
 
 
 def get_or_create_category(name):

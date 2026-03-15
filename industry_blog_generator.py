@@ -6,12 +6,7 @@ industry_blog_generator.py — 블로그용 산업분석 요약 포스트 생성
 WP 전체 분석 링크로 블로그 → WordPress 유입 유도.
 """
 
-import json
-from openai import OpenAI
-from config import OPENAI_API_KEY
-
-openai_client = OpenAI(api_key=OPENAI_API_KEY, timeout=120.0, max_retries=0)
-BLOG_MODEL = 'gpt-5-mini'
+from openai_utils import _call_openai_json
 
 
 # =====================================================
@@ -52,21 +47,7 @@ JSON으로만 반환:
   "마무리_질문": "..."
 }}"""
 
-    for attempt in range(1, 4):
-        try:
-            resp = openai_client.chat.completions.create(
-                model=BLOG_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"},
-                max_completion_tokens=3000,
-            )
-            text = resp.choices[0].message.content.strip()
-            start, end = text.find('{'), text.rfind('}')
-            if start != -1 and end > start:
-                return json.loads(text[start:end + 1])
-        except Exception as e:
-            print(f"  [블로그] GPT {attempt}/3 실패: {e}")
-    return {}
+    return _call_openai_json(prompt, max_tokens=3000)
 
 
 # =====================================================
