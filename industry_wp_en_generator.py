@@ -83,6 +83,7 @@ Rules:
 5. AEO: include clear Q&A structure that AI engines can cite
 6. Each section: include an anchor id (lowercase hyphen)
 7. All section titles, subtitles, and FAQ topics must be in English — no Korean characters allowed
+8. Do NOT include meta-labels like "SEO", "AEO", "for AI citation", "for investors", "investor-facing" in section titles — these are internal guidelines only
 
 Deep research content (first 3000 chars):
 {deep_research_text[:3000]}
