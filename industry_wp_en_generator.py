@@ -286,40 +286,53 @@ Return JSON only:
 # 메인: 영어 아티클 조립
 # =====================================================
 
+def _translate_to_en(industry_name):
+    """Translate Korean industry name to English for use in EN article prompts."""
+    result = _call_openai_json(
+        f'Translate this industry/topic name to a concise English equivalent (5 words max). '
+        f'Return JSON only: {{"en": "translated name"}}\n\nInput: {industry_name}',
+        max_tokens=50
+    )
+    return result.get('en') or industry_name
+
+
 def generate_en_article(industry_name, deep_research_text, related_posts=None, images=None):
     """Generate full English industry analysis article.
     Returns: dict (title, content, seo_title, meta_description, focus_keyword,
                     slug, tags, faq_list)
     images: list of {'wp_url': str, 'description': str} — WP uploaded images
     """
+    industry_name_en = _translate_to_en(industry_name)
+    print(f"  [EN] Topic: {industry_name_en}")
+
     print(f"  [EN] Designing TOC...")
-    toc, faq_topics = generate_toc_en(industry_name, deep_research_text)
+    toc, faq_topics = generate_toc_en(industry_name_en, deep_research_text)
     if not toc:
         print("  [EN] TOC generation failed")
         return {}
 
     print(f"  [EN] Generating SEO metadata...")
-    seo = generate_seo_meta_en(industry_name, toc, deep_research_text)
+    seo = generate_seo_meta_en(industry_name_en, toc, deep_research_text)
 
-    focus_keyword = seo.get('focus_keyword', f'{industry_name} market outlook')
-    seo_title     = seo.get('seo_title', f'{industry_name} Industry Analysis {__import__("datetime").datetime.now().year}')
+    focus_keyword = seo.get('focus_keyword', f'{industry_name_en} market outlook')
+    seo_title     = seo.get('seo_title', f'{industry_name_en} Industry Analysis {__import__("datetime").datetime.now().year}')
     meta_desc     = seo.get('meta_description', '')
-    slug          = seo.get('slug', '') or _slugify(f'{industry_name}-industry-analysis-en')
-    tags          = seo.get('tags', [industry_name])
+    slug          = seo.get('slug', '') or _slugify(f'{industry_name_en}-industry-analysis-en')
+    tags          = seo.get('tags', [industry_name_en])
 
     print(f"  [EN] Generating introduction...")
-    intro = generate_intro_en(industry_name, deep_research_text, focus_keyword)
+    intro = generate_intro_en(industry_name_en, deep_research_text, focus_keyword)
 
     print(f"  [EN] Generating {len(toc)} sections...")
     section_htmls = []
     for i, sec in enumerate(toc, 1):
         print(f"    Section {i}/{len(toc)}: {sec.get('h2', '')}")
         section_htmls.append(
-            generate_section_content_en(industry_name, sec, deep_research_text, focus_keyword, images=images)
+            generate_section_content_en(industry_name_en, sec, deep_research_text, focus_keyword, images=images)
         )
 
     print(f"  [EN] Generating FAQ...")
-    faq_list = generate_faq_en(industry_name, faq_topics, deep_research_text)
+    faq_list = generate_faq_en(industry_name_en, faq_topics, deep_research_text)
 
     # ── Internal links ──
     internal_links_html = ''
