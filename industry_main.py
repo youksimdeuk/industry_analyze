@@ -30,7 +30,8 @@ from config import (
     PUBLISH_WEBHOOK_URL,
     SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
 )
-from industry_wp_ko_generator import generate_ko_article, _slugify
+from industry_wp_ko_generator import generate_ko_article
+from openai_utils import _slugify
 from industry_wp_en_generator import generate_en_article
 from industry_blog_generator import generate_blog_post
 from wp_publisher import publish_industry_draft, upload_media, check_wp_auth

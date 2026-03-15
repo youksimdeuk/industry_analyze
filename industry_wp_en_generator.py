@@ -3,64 +3,8 @@ industry_wp_en_generator.py — 영어 산업분석 WordPress 아티클 생성
 SEO + AEO (Answer Engine Optimization) 적용 — Foreign investor perspective
 """
 
-import json
 import re
-from openai import OpenAI
-from config import OPENAI_API_KEY
-
-openai_client = OpenAI(api_key=OPENAI_API_KEY, timeout=180.0, max_retries=0)
-OPENAI_MODEL   = 'gpt-5-mini'
-FALLBACK_MODEL = 'gpt-5-mini'
-
-
-# =====================================================
-# 유틸
-# =====================================================
-
-def _call_openai(prompt, max_tokens=16000, model=None):
-    primary = model or OPENAI_MODEL
-    models_to_try = [primary] if primary == FALLBACK_MODEL else [primary, FALLBACK_MODEL]
-    for m in models_to_try:
-        for attempt in range(1, 4):
-            try:
-                resp = openai_client.chat.completions.create(
-                    model=m,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_completion_tokens=max_tokens,
-                )
-                return resp.choices[0].message.content.strip()
-            except Exception as e:
-                print(f"  [OpenAI] {m} {attempt}/3 failed: {e}")
-    return ''
-
-
-def _call_openai_json(prompt, max_tokens=6000):
-    for model in [OPENAI_MODEL, FALLBACK_MODEL]:
-        for use_json in (True, False):
-            for attempt in range(1, 4):
-                try:
-                    kwargs = {
-                        'model': model,
-                        'messages': [{"role": "user", "content": prompt}],
-                        'max_completion_tokens': max_tokens,
-                    }
-                    if use_json:
-                        kwargs['response_format'] = {"type": "json_object"}
-                    resp = openai_client.chat.completions.create(**kwargs)
-                    text = resp.choices[0].message.content.strip()
-                    start, end = text.find('{'), text.rfind('}')
-                    if start != -1 and end > start:
-                        return json.loads(text[start:end + 1])
-                except Exception as e:
-                    print(f"  [OpenAI JSON] {model} {attempt}/3 failed: {e}")
-    return {}
-
-
-def _slugify(text):
-    text = text.lower()
-    text = re.sub(r'[^\w\s-]', '', text)
-    text = re.sub(r'[\s_]+', '-', text)
-    return text.strip('-')[:80]
+from openai_utils import _call_openai, _call_openai_json, _slugify
 
 
 # =====================================================
@@ -90,6 +34,7 @@ Deep research content (first 3000 chars):
 
 Return JSON only:
 {{
+  "industry_name_en": "English translation of the industry/topic name (5 words max)",
   "toc": [
     {{"h2": "Section Title", "anchor": "section-anchor", "h3": ["Subsection1", "Subsection2"]}},
     ...
@@ -97,7 +42,7 @@ Return JSON only:
   "faq_topics": ["FAQ topic 1", "FAQ topic 2", "FAQ topic 3", "FAQ topic 4", "FAQ topic 5"]
 }}"""
     result = _call_openai_json(prompt, max_tokens=4000)
-    return result.get('toc', []), result.get('faq_topics', [])
+    return result.get('toc', []), result.get('faq_topics', []), result.get('industry_name_en', '') or industry_name
 
 
 # =====================================================
@@ -287,27 +232,15 @@ Return JSON only:
 # 메인: 영어 아티클 조립
 # =====================================================
 
-def _translate_to_en(industry_name):
-    """Translate Korean industry name to English for use in EN article prompts."""
-    result = _call_openai_json(
-        f'Translate this industry/topic name to a concise English equivalent (5 words max). '
-        f'Return JSON only: {{"en": "translated name"}}\n\nInput: {industry_name}',
-        max_tokens=50
-    )
-    return result.get('en') or industry_name
-
-
 def generate_en_article(industry_name, deep_research_text, related_posts=None, images=None):
     """Generate full English industry analysis article.
     Returns: dict (title, content, seo_title, meta_description, focus_keyword,
                     slug, tags, faq_list)
     images: list of {'wp_url': str, 'description': str} — WP uploaded images
     """
-    industry_name_en = _translate_to_en(industry_name)
-    print(f"  [EN] Topic: {industry_name_en}")
-
     print(f"  [EN] Designing TOC...")
-    toc, faq_topics = generate_toc_en(industry_name_en, deep_research_text)
+    toc, faq_topics, industry_name_en = generate_toc_en(industry_name, deep_research_text)
+    print(f"  [EN] Topic: {industry_name_en}")
     if not toc:
         print("  [EN] TOC generation failed")
         return {}

@@ -39,7 +39,7 @@ def _raise_wp_error(r):
             f"{r.status_code} {r.reason} — WP code: {wp.get('code')} / {wp.get('message')}",
             response=r,
         )
-    except (ValueError, KeyError):
+    except Exception:
         r.raise_for_status()
 
 
