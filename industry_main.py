@@ -39,7 +39,8 @@ from pdf_extractor import extract_from_pdf
 from db import get_post_id, log_publish
 
 SCOPES = [
-    'https://www.googleapis.com/auth/drive.readonly',
+    'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/spreadsheets',
 ]
 
 # =====================================================
