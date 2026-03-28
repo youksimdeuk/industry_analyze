@@ -7,6 +7,72 @@ import re
 from openai_utils import _call_openai, _call_openai_json, _slugify
 
 
+def _style_tables(html: str) -> str:
+    """GPT가 생성한 HTML의 모든 테이블에 인라인 스타일 주입 (모바일 대응 포함)."""
+    TABLE_STYLE  = 'border-collapse:collapse;width:100%;font-size:13px;margin:20px 0;'
+    TH_STYLE     = ('background:#1a3a5c;color:#fff;padding:8px 10px;'
+                    'text-align:center;border:1px solid #2d5a8e;white-space:nowrap;font-weight:600;')
+    TD_STYLE     = 'padding:7px 10px;border:1px solid #dde3ea;vertical-align:top;'
+    TR_EVEN_BG   = 'background:#f5f8fc;'
+
+    # <table> 태그 스타일 교체
+    html = re.sub(
+        r'<table[^>]*>',
+        f'<table style="{TABLE_STYLE}">',
+        html, flags=re.IGNORECASE
+    )
+    # <th> 스타일 교체
+    html = re.sub(
+        r'<th[^>]*>',
+        f'<th style="{TH_STYLE}">',
+        html, flags=re.IGNORECASE
+    )
+    # <td> 스타일 교체
+    html = re.sub(
+        r'<td[^>]*>',
+        f'<td style="{TD_STYLE}">',
+        html, flags=re.IGNORECASE
+    )
+    # 짝수 <tr>에 배경색 (thead 제외)
+    def _stripe_tr(m):
+        return m.group(0)  # 먼저 원본 유지
+
+    # thead 안 <tr>은 건드리지 않고 tbody <tr>만 줄무늬
+    def _apply_stripe(html_text):
+        result = []
+        in_thead = False
+        tr_idx = 0
+        for token in re.split(r'(<thead[^>]*>|</thead>|<tr[^>]*>)', html_text):
+            if re.match(r'<thead', token, re.I):
+                in_thead = True
+                result.append(token)
+            elif re.match(r'</thead', token, re.I):
+                in_thead = False
+                result.append(token)
+            elif re.match(r'<tr', token, re.I):
+                if not in_thead:
+                    bg = TR_EVEN_BG if tr_idx % 2 == 1 else ''
+                    result.append(f'<tr style="{bg}">')
+                    tr_idx += 1
+                else:
+                    result.append(token)
+            else:
+                result.append(token)
+        return ''.join(result)
+
+    html = _apply_stripe(html)
+
+    # 모바일 대응: <table> 를 overflow-x:auto 래퍼로 감싸기
+    html = re.sub(
+        r'(<table style="[^"]*">)',
+        r'<div style="overflow-x:auto;margin:20px 0;">\1',
+        html, flags=re.IGNORECASE
+    )
+    html = re.sub(r'(</table>)', r'\1</div>', html, flags=re.IGNORECASE)
+
+    return html
+
+
 # =====================================================
 # Step 1: GPT 목차 설계
 # =====================================================
@@ -126,19 +192,22 @@ def _build_faq_html(faq_list):
     )
 
 
-def generate_intro(industry_name, deep_research_text, focus_keyword):
-    """AI 스니펫 최적화 도입부 (3문장, focus_keyword 첫 100자 내 포함)"""
-    prompt = f"""'{industry_name}' 산업분석 한국어 블로그 글의 도입부를 3문장으로 작성하세요.
+def generate_intro(industry_name, section_texts, focus_keyword):
+    """글 전체 내용을 기반으로 핵심 요약 생성 (bullet 3~5개)"""
+    combined = '\n'.join(section_texts)[:4000]
+    prompt = f"""아래는 '{industry_name}' 산업분석 글의 본문 내용입니다.
+이 글 전체를 읽고 한국 투자자에게 가장 중요한 핵심을 bullet 3~5개로 요약하세요.
 
 규칙:
-- 첫 문장 100자 이내에 반드시 '{focus_keyword}' 포함
-- 산업의 핵심 현황을 직접 답변 형태로 (AI 스니펫 최적화)
-- 한국 투자자의 관심을 끄는 수치나 트렌드 1개 포함
-- 3문장만 출력 (다른 설명 없이)
+- 각 bullet은 1~2문장으로 간결하게
+- 구체적 수치·트렌드·리스크가 있으면 반드시 포함
+- HTML <ul><li> 형식으로 출력
+- 첫 번째 bullet에 '{focus_keyword}' 자연스럽게 포함
+- 다른 설명 없이 <ul>...</ul>만 출력
 
-딥리서치 핵심 내용:
-{deep_research_text[:2000]}"""
-    return _call_openai(prompt, max_tokens=600)
+본문 내용:
+{combined}"""
+    return _call_openai(prompt, max_tokens=800)
 
 
 def generate_section_content(industry_name, section, deep_research_text, focus_keyword, images=None):
@@ -236,9 +305,6 @@ def generate_ko_article(industry_name, deep_research_text, related_posts=None, i
     slug          = seo.get('slug', '') or _slugify(f'{industry_name}-industry-analysis')
     tags          = seo.get('tags', [industry_name])
 
-    print(f"  [KO] 도입부 생성 중...")
-    intro = generate_intro(industry_name, deep_research_text, focus_keyword)
-
     print(f"  [KO] 본문 {len(toc)}개 섹션 생성 중...")
     section_htmls = []
     for i, sec in enumerate(toc, 1):
@@ -246,6 +312,17 @@ def generate_ko_article(industry_name, deep_research_text, related_posts=None, i
         section_htmls.append(
             generate_section_content(industry_name, sec, deep_research_text, focus_keyword, images=images)
         )
+
+    print(f"  [KO] 핵심 요약 생성 중 (글 전체 기반)...")
+    intro = generate_intro(industry_name, section_htmls, focus_keyword)
+    if not intro:
+        # fallback: 딥리서치 첫 단락에서 자동 추출
+        for line in deep_research_text.split('\n'):
+            line = line.strip()
+            if len(line) >= 30:
+                intro = f'<ul><li>{line[:300]}</li></ul>'
+                print(f"  [KO] 핵심 요약 fallback 사용")
+                break
 
     print(f"  [KO] FAQ 생성 중...")
     faq_list = generate_faq(industry_name, faq_topics, deep_research_text)
@@ -268,13 +345,16 @@ def generate_ko_article(industry_name, deep_research_text, related_posts=None, i
     toc_html = _build_toc_html(toc)
     faq_html = _build_faq_html(faq_list)
 
-    content_parts = [
-        # 도입 요약 박스 (AI 스니펫용)
+    summary_box = (
         '<div class="summary-box" style="background:#e8f0fe;border-left:4px solid #1a73e8;'
-        'padding:16px 20px;margin:0 0 24px;border-radius:4px;">',
-        f'<p style="font-weight:bold;margin:0 0 4px;color:#1a3a5c;">📌 핵심 요약</p>',
-        f'<p style="margin:0;">{intro}</p>',
-        '</div>',
+        'padding:16px 20px;margin:0 0 24px;border-radius:4px;">'
+        '<p style="font-weight:bold;margin:0 0 4px;color:#1a3a5c;">📌 핵심 요약</p>'
+        f'<p style="margin:0;">{intro}</p>'
+        '</div>'
+    ) if intro else ''
+
+    content_parts = [
+        summary_box,
         toc_html,
         '\n'.join(section_htmls),
         faq_html,
@@ -284,7 +364,7 @@ def generate_ko_article(industry_name, deep_research_text, related_posts=None, i
         '※ 본 글은 투자 참고용 정보이며, 투자 권유가 아닙니다. 투자 결정은 본인의 판단과 책임 하에 이루어져야 합니다.'
         '</p>',
     ]
-    content = '\n'.join(content_parts)
+    content = _style_tables('\n'.join(content_parts))
 
     return {
         'title':            seo_title,

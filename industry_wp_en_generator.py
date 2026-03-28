@@ -6,6 +6,7 @@ SEO + AEO (Answer Engine Optimization) 적용 — Foreign investor perspective
 import re
 import requests
 from openai_utils import _call_openai, _call_openai_json, _slugify
+from industry_wp_ko_generator import _style_tables
 
 _KRW_RATE_CACHE = None
 
@@ -363,7 +364,7 @@ def generate_en_article(industry_name, deep_research_text, related_posts=None, i
         'All investment decisions should be made at the investor\'s own discretion and risk.'
         '</p>',
     ]
-    content = '\n'.join(content_parts)
+    content = _style_tables('\n'.join(content_parts))
 
     return {
         'title':            seo_title,
