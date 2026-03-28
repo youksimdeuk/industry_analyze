@@ -8,8 +8,8 @@ from openai import OpenAI
 from config import OPENAI_API_KEY
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY, timeout=180.0, max_retries=0)
-OPENAI_MODEL   = 'gpt-5-mini'
-FALLBACK_MODEL = 'gpt-5-mini'
+OPENAI_MODEL   = 'gpt-5.4-nano'
+FALLBACK_MODEL = 'gpt-5.4-nano'
 
 
 def _call_openai(prompt, max_tokens=16000, model=None):
