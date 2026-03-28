@@ -4,7 +4,61 @@ SEO + AEO (Answer Engine Optimization) 적용 — Foreign investor perspective
 """
 
 import re
+import requests
 from openai_utils import _call_openai, _call_openai_json, _slugify
+
+_KRW_RATE_CACHE = None
+
+def _get_krw_usd_rate() -> float:
+    """KRW per 1 USD. 실패 시 1,400 fallback."""
+    global _KRW_RATE_CACHE
+    if _KRW_RATE_CACHE:
+        return _KRW_RATE_CACHE
+    try:
+        resp = requests.get('https://open.er-api.com/v6/latest/USD', timeout=5)
+        rate = float(resp.json()['rates']['KRW'])
+        _KRW_RATE_CACHE = rate
+        return rate
+    except Exception:
+        pass
+    try:
+        resp = requests.get('https://api.frankfurter.app/latest?from=USD&to=KRW', timeout=5)
+        rate = float(resp.json()['rates']['KRW'])
+        _KRW_RATE_CACHE = rate
+        return rate
+    except Exception:
+        pass
+    _KRW_RATE_CACHE = 1400.0
+    return 1400.0
+
+
+def _convert_krw_text(text: str) -> str:
+    """텍스트 내 KRW/억원/조원 수치를 USD M으로 변환."""
+    rate = _get_krw_usd_rate()
+
+    def _jo(m):
+        try:
+            return f"{round(float(m.group(1).replace(',', '')) * 1e12 / rate / 1e6, 1)} USD M"
+        except Exception:
+            return m.group(0)
+
+    def _eok(m):
+        try:
+            return f"{round(float(m.group(1).replace(',', '')) * 1e8 / rate / 1e6, 1)} USD M"
+        except Exception:
+            return m.group(0)
+
+    def _won(m):
+        try:
+            return f"{round(float(m.group(1).replace(',', '')) / rate / 1e6, 1)} USD M"
+        except Exception:
+            return m.group(0)
+
+    text = re.sub(r'([\d,]+)\s*조원?', _jo, text)
+    text = re.sub(r'([\d,]+)\s*억원?', _eok, text)
+    text = re.sub(r'[₩\ufffc]([\d,]+)', _won, text)
+    text = re.sub(r'\bKRW\s*([\d,]+)', _won, text, flags=re.IGNORECASE)
+    return text
 
 
 # =====================================================
@@ -181,6 +235,7 @@ def generate_section_content_en(industry_name, section, deep_research_text, focu
 targeting global equity investors.
 
 IMPORTANT: Write in English only. Do not use Korean anywhere — not in headings, paragraphs, or tables.
+CURRENCY RULE (absolute): All financial figures must be in USD million (USD M). Never write 억원, 조원, KRW, or ₩ anywhere. If you encounter KRW values in the reference data, they have already been converted to USD M — use those values as-is.
 
 Rules:
 - First paragraph (2–3 sentences): direct answer to what this section covers (AEO: AI citation ready)
@@ -238,6 +293,11 @@ def generate_en_article(industry_name, deep_research_text, related_posts=None, i
                     slug, tags, faq_list)
     images: list of {'wp_url': str, 'description': str} — WP uploaded images
     """
+    # KRW → USD 변환 (억원/조원 → USD M)
+    rate = _get_krw_usd_rate()
+    deep_research_text = _convert_krw_text(deep_research_text)
+    print(f"  [EN] KRW→USD 변환 완료 (환율: {rate:.0f})")
+
     print(f"  [EN] Designing TOC...")
     toc, faq_topics, industry_name_en = generate_toc_en(industry_name, deep_research_text)
     print(f"  [EN] Topic: {industry_name_en}")
