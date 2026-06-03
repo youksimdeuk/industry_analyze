@@ -17,19 +17,15 @@ from datetime import datetime
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
 from config import (
     OPENAI_API_KEY,
-    GOOGLE_CREDENTIALS_PATH, GOOGLE_TOKEN_PATH,
-    GOOGLE_CREDENTIALS_JSON, GOOGLE_TOKEN_JSON,
     WP_URL, WP_USERNAME, WP_APP_PASSWORD,
     PUBLISH_WEBHOOK_URL,
     SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
 )
+from google_oauth import get_google_creds as shared_get_google_creds
 from industry_wp_ko_generator import generate_ko_article
 from openai_utils import _slugify
 from industry_wp_en_generator import generate_en_article
@@ -74,6 +70,9 @@ def get_google_creds():
         with open(GOOGLE_TOKEN_PATH, 'w') as f:
             f.write(creds.to_json())
     return creds
+
+
+get_google_creds = shared_get_google_creds
 
 
 # =====================================================
@@ -131,26 +130,50 @@ def _supabase_headers():
     }
 
 
-def is_already_processed(industry_name, period_key):
-    """Supabase에서 해당 industry_name + period_key 레코드가 있으면 True"""
+class DedupCheckError(Exception):
+    """중복 여부를 확정하지 못함 (Supabase 오류/네트워크 등).
+
+    이 경우 '미처리'로 단정하면 중복 발행 위험이 있으므로,
+    호출부는 이번 실행을 건너뛰고(보류) 다음 실행에서 재시도한다.
+    """
+
+
+def is_already_processed(doc_id):
+    """해당 doc_id(드라이브 파일 고유ID) 레코드가 Supabase에 있으면 True.
+
+    중복 판정 기준을 '현재 월(period_key)'이 아니라 PDF 파일 고유ID로 둔다.
+    → 같은 PDF가 폴더에 남아 있어도 월이 바뀔 때 재발행되지 않는다.
+
+    반환:
+      True  — 이미 처리됨 (DB가 레코드 있음을 확인)
+      False — 확실히 미처리 (DB가 200으로 빈 결과를 확인)
+    예외:
+      DedupCheckError — DB 응답이 불확실(예외/비200). 발행 보류해야 함.
+    """
+    # Supabase 미설정 환경: 중복 체크 불가 — 기존 동작(발행 진행) 유지
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
         return False
+    if not doc_id:
+        return False
+
+    url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/industry_posts"
     try:
-        url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/industry_posts"
         r = requests.get(
             url,
-            params={'industry_name': f'eq.{industry_name}', 'period_key': f'eq.{period_key}', 'select': 'industry_name'},
+            params={'doc_id': f'eq.{doc_id}', 'select': 'doc_id'},
             headers=_supabase_headers(),
             timeout=10,
         )
-        if r.status_code == 200 and r.json():
-            return True
     except Exception as e:
-        print(f"  [Supabase] 중복 체크 오류 (무시): {e}")
-    return False
+        raise DedupCheckError(f"Supabase 연결 실패: {e}")
+
+    if r.status_code != 200:
+        raise DedupCheckError(f"Supabase 응답 오류: {r.status_code} {r.text[:120]}")
+
+    return bool(r.json())
 
 
-def save_to_supabase(industry_name, period_key, content_ko='', content_en='',
+def save_to_supabase(industry_name, period_key, doc_id=None, content_ko='', content_en='',
                      wp_ko_url=None, wp_en_url=None, slug=None, blog_summary_ko=''):
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
         print("  [Supabase] 환경변수 없음 — 저장 스킵")
@@ -160,6 +183,7 @@ def save_to_supabase(industry_name, period_key, content_ko='', content_en='',
     payload = {
         'industry_name':    industry_name,
         'period_key':       period_key,
+        'doc_id':           doc_id,
         'content_ko':       content_ko,
         'content_en':       content_en,
         'wp_ko_url':        wp_ko_url,
@@ -169,7 +193,7 @@ def save_to_supabase(industry_name, period_key, content_ko='', content_en='',
     }
     try:
         r = requests.post(
-            f"{url}?on_conflict=industry_name,period_key",
+            f"{url}?on_conflict=doc_id",
             json=payload, headers=headers, timeout=15,
         )
         if r.status_code in (200, 201):
@@ -302,6 +326,7 @@ def process_doc(drive_service, doc_id, doc_name):
     print("\n[5/5] Supabase 저장 중...")
     post_id = save_to_supabase(
         industry_name, period_key,
+        doc_id=doc_id,
         content_ko=ko_content,
         content_en=en_content,
         wp_ko_url=ko_url,
@@ -349,10 +374,16 @@ def run_all():
         doc_name = meta.get('name', target_id)
         industry_name = extract_industry_name(doc_name)
         summary['found'] = 1
-        if not force and is_already_processed(industry_name, period_key):
-            print(f"  이미 처리됨 (Supabase). 건너뜀 (FORCE_REANALYZE 미지정)")
-            summary['skipped'] += 1
-            return summary
+        if not force:
+            try:
+                if is_already_processed(target_id):
+                    print(f"  이미 처리됨 (Supabase, doc_id={target_id}). 건너뜀 (FORCE_REANALYZE 미지정)")
+                    summary['skipped'] += 1
+                    return summary
+            except DedupCheckError as e:
+                print(f"  ⚠️ 중복 확인 불가 — 발행 보류(다음 실행에서 재시도): {e}")
+                summary['skipped'] += 1
+                return summary
         ok = process_doc(drive_service, target_id, doc_name)
         if ok:
             summary['processed'] += 1
@@ -371,10 +402,16 @@ def run_all():
         doc_id        = doc['id']
         doc_name      = doc['name']
         industry_name = extract_industry_name(doc_name)
-        if not force and is_already_processed(industry_name, period_key):
-            print(f"  [{doc_name}] 이미 처리됨 (Supabase). 건너뜀.")
-            summary['skipped'] += 1
-            continue
+        if not force:
+            try:
+                if is_already_processed(doc_id):
+                    print(f"  [{doc_name}] 이미 처리됨 (Supabase, doc_id={doc_id}). 건너뜀.")
+                    summary['skipped'] += 1
+                    continue
+            except DedupCheckError as e:
+                print(f"  ⚠️ [{doc_name}] 중복 확인 불가 — 발행 보류(다음 실행에서 재시도): {e}")
+                summary['skipped'] += 1
+                continue
         try:
             ok = process_doc(drive_service, doc_id, doc_name)
             if ok:

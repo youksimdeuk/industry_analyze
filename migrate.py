@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS industry_posts (
   id               BIGSERIAL PRIMARY KEY,
   industry_name    TEXT        NOT NULL,
   period_key       TEXT        NOT NULL,
+  doc_id           TEXT,
   content_ko       TEXT,
   content_en       TEXT,
   blog_summary_ko  TEXT,
@@ -37,6 +38,20 @@ CREATE TABLE IF NOT EXISTS industry_posts (
   updated_at       TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (industry_name, period_key)
 );
+
+-- 중복 판정 기준을 '월(period_key)'에서 PDF 파일 고유ID(doc_id)로 전환
+ALTER TABLE industry_posts ADD COLUMN IF NOT EXISTS doc_id TEXT;
+
+-- doc_id 기준 upsert(on_conflict=doc_id)를 위한 유니크 인덱스
+-- 일반 유니크 인덱스: Postgres는 NULL을 서로 다른 값으로 취급하므로
+-- 과거 행(doc_id IS NULL) 여러 개도 허용된다.
+-- (부분 인덱스 WHERE 절은 PostgREST on_conflict 추론과 충돌하므로 사용하지 않는다)
+DROP INDEX IF EXISTS industry_posts_doc_id_key;
+CREATE UNIQUE INDEX IF NOT EXISTS industry_posts_doc_id_key
+  ON industry_posts (doc_id);
+
+-- 기존 월별 유니크 제약은 doc_id 기준 upsert와 충돌할 수 있어 제거
+ALTER TABLE industry_posts DROP CONSTRAINT IF EXISTS industry_posts_industry_name_period_key_key;
 """
 
 def run_via_postgres():
